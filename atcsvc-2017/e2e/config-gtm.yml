@@ -1,5 +1,5 @@
 endpoint:
-  url: http://204.48.19.190/
+  url: https://walker-atesvc2017-e2e.intuit.com/atesvc2017/#/monitoring
   method: GET
   timeout: 0.5
   expectation:
@@ -11,6 +11,7 @@ endpoint:
       regex: '.*(<body).*'
   allowed_fails: 0
 cachet:
+  # api_url: http://localhost:80/api/v1
   api_url: http://206.189.69.189/api/v1
   token: mO8tnTWU59ZKmCbZVG9y
   component_id: 1

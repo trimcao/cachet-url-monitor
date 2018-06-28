@@ -1,5 +1,5 @@
 FROM python:2.7-alpine
-MAINTAINER Mitsuo Takaki <mitsuotakaki@gmail.com>
+MAINTAINER Tri M. Cao <trimcao@gmail.com>
 
 WORKDIR /usr/src/app
 
