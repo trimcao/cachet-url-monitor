@@ -1,5 +1,6 @@
 endpoint:
   url: https://walker-atesvc2017-dev.intuit.com/atesvc2017/#/monitoring
+  version_url: https://walker-atesvc2017-dev.intuit.com/atesvc2017/version.txt
   method: GET
   timeout: 0.5
   expectation:

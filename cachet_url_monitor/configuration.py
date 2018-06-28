@@ -96,6 +96,11 @@ class Configuration(object):
         self.endpoint_method = os.environ.get('ENDPOINT_METHOD') or self.data['endpoint']['method']
         self.endpoint_url = os.environ.get('ENDPOINT_URL') or self.data['endpoint']['url']
         self.endpoint_url = normalize_url(self.endpoint_url)
+
+        # added version url
+        self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
+        self.endpoint_version_url = normalize_url(self.endpoint_version_url)
+
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
 
@@ -111,6 +116,9 @@ class Configuration(object):
 
         # We need the current status so we monitor the status changes. This is necessary for creating incidents.
         self.status = get_current_status(self.api_url, self.component_id, self.headers)
+
+        # store the build version
+        self.version = ""
 
         # Get remaining settings
         self.public_incidents = int(
@@ -189,6 +197,10 @@ class Configuration(object):
             self.status = st.COMPONENT_STATUS_PERFORMANCE_ISSUES
             return
 
+        # obtain the build version
+        r = requests.get(self.endpoint_version_url)
+        self.version = r.text.split('-->')[0]
+
         # We initially assume the API is healthy.
         self.status = st.COMPONENT_STATUS_OPERATIONAL
         self.message = ''
@@ -231,12 +243,14 @@ class Configuration(object):
         """
         if not self.trigger_update:
             return
-        params = {'id': self.component_id, 'status': self.status}
+        # added push version number to the description        
+        params = {'id': self.component_id, 'status': self.status, 'description': self.version}
         component_request = requests.put('%s/components/%d' % (self.api_url, self.component_id), params=params,
                                          headers=self.headers)
         if component_request.ok:
             # Successful update
             self.logger.info('Component update: status [%d]' % (self.status,))
+            # self.logger.info('I am here hungry and waiting for lunch.')
         else:
             # Failed to update the API status
             self.logger.warning('Component update failed with status [%d]: API'

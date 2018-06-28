@@ -1,5 +1,6 @@
 endpoint:
   url: https://walker-atesvc2017-qal.intuit.com/atesvc2017/#/monitoring
+  version_url: https://walker-atesvc2017-qal.intuit.com/atesvc2017/version.txt
   method: GET
   timeout: 0.5
   expectation:
@@ -14,7 +15,7 @@ cachet:
   # api_url: http://localhost:80/api/v1
   api_url: http://206.189.69.189/api/v1
   token: mO8tnTWU59ZKmCbZVG9y
-  component_id: 1
+  component_id: 2
   # metric_id: 1
   action:
     - CREATE_INCIDENT
