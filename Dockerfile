@@ -9,6 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY cachet_url_monitor/* /usr/src/app/cachet_url_monitor/
 
 COPY config.yml /usr/src/app/config/
+COPY atesvc-2016/* /usr/src/app/config/atesvc-2016/
 VOLUME /usr/src/app/config/
 
-CMD ["python", "cachet_url_monitor/scheduler.py", "config/config.yml"]
+COPY atesvc-2016.sh .
+RUN chmod 755 atesvc-2016.sh
+ENTRYPOINT [ "./atesvc-2016.sh" ]

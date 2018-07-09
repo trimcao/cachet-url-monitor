@@ -99,7 +99,8 @@ class Configuration(object):
 
         # added version url
         self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
-        self.endpoint_version_url = normalize_url(self.endpoint_version_url)
+        if self.endpoint_version_url:
+            self.endpoint_version_url = normalize_url(self.endpoint_version_url)
 
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
@@ -198,8 +199,12 @@ class Configuration(object):
             return
 
         # obtain the build version
-        r = requests.get(self.endpoint_version_url)
-        self.version = r.text.split('-->')[0]
+        if (self.endpoint_version_url):
+            r = requests.get(self.endpoint_version_url)
+            if r.status_code == requests.codes.ok:
+                self.version = r.text.split('-->')[0]
+            else:
+                self.version = 'Unknown'
 
         # We initially assume the API is healthy.
         self.status = st.COMPONENT_STATUS_OPERATIONAL
