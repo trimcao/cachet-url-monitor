@@ -18,7 +18,8 @@ import status as st
 configuration_mandatory_fields = {
     # 'endpoint': ['url', 'method', 'timeout', 'expectation'],
     'endpoint': ['method', 'timeout', 'expectation'],
-    'cachet': ['api_url', 'token', 'component_id'],
+    # 'cachet': ['api_url', 'token', 'component_id'],
+    'cachet': ['api_url', 'token'],
     'frequency': []}
 
 
@@ -100,6 +101,7 @@ class Configuration(object):
         self.endpoint_urls = []
         self.endpoint_urls.append("https://walker-atesvc2014-tdp-qdc.dckr.intuit.net/atesvc2014/v1/health")
         self.endpoint_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/v1/health")
+        self.endpoint_urls.append("https://www.google.com/")
         for i, url in enumerate(self.endpoint_urls):
             self.endpoint_urls[i] = normalize_url(url)
 
@@ -114,8 +116,10 @@ class Configuration(object):
         self.endpoint_version_urls = []
         self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
         self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
+        self.endpoint_version_urls.append("")
         for i, url in enumerate(self.endpoint_version_urls):
-            self.endpoint_version_urls[i] = normalize_url(url)
+            if self.endpoint_version_urls[i]:
+                self.endpoint_version_urls[i] = normalize_url(url)
             self.versions.append("")
 
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
@@ -123,7 +127,7 @@ class Configuration(object):
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
         # self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
-        self.component_ids = [1, 2]
+        self.component_ids = [1, 2, 3]
 
         # ignore metric for now
         self.metric_id = os.environ.get('CACHET_METRIC_ID') or self.data['cachet'].get('metric_id')
@@ -188,6 +192,7 @@ class Configuration(object):
                 if sub_key not in self.data[key]:
                     configuration_errors.append('%s.%s' % (key, sub_key))
 
+        # we don't validate endpoint because we will provide the endpoint urls here, not in the config
         # if ('endpoint' in self.data and 'expectation' in
         #     self.data['endpoint']):
         #     if (not isinstance(self.data['endpoint']['expectation'], list) or
@@ -226,19 +231,19 @@ class Configuration(object):
                 return
 
             # obtain the build version
-            # if (self.endpoint_version_url):
-            #     r = requests.get(self.endpoint_version_url)
-            #     if r.status_code == requests.codes.ok:
-            #         self.version = r.text.split('-->')[0]
-            #     else:
-            #         self.version = 'Unknown'
+            if (self.endpoint_version_urls[i]):
+                r = requests.get(self.endpoint_version_urls[i])
+                if r.status_code == requests.codes.ok:
+                    self.versions[i] = r.text.split('-->')[0]
+                else:
+                    self.versions[i] = 'Unknown'
 
             # We initially assume the API is healthy.
             self.statuses[i] = st.COMPONENT_STATUS_OPERATIONAL
             self.messages[i] = ''
             for expectation in self.expectations:
                 status = expectation.get_status(self.requests[i])
-
+                # self.logger.info('Component %d check: expectation status [%d]' % (self.component_ids[i], status,))
                 # The greater the status is, the worse the state of the API is.
                 if status > self.statuses[i]:
                     self.statuses[i] = status
@@ -274,7 +279,7 @@ class Configuration(object):
         status based on the previous call to evaluate().
         """
         for i in range(self.num_urls):
-            if not self.trigger_update:
+            if not self.trigger_updates[i]:
                 return
             # added push version number to the description        
             params = {'id': self.component_ids[i], 'status': self.statuses[i], 'description': self.versions[i]}
