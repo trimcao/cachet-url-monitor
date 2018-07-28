@@ -16,7 +16,8 @@ import status as st
 # This is the mandatory fields that must be in the configuration file in this
 # same exact structure.
 configuration_mandatory_fields = {
-    'endpoint': ['url', 'method', 'timeout', 'expectation'],
+    # 'endpoint': ['url', 'method', 'timeout', 'expectation'],
+    'endpoint': ['method', 'timeout', 'expectation'],
     'cachet': ['api_url', 'token', 'component_id'],
     'frequency': []}
 
@@ -94,19 +95,37 @@ class Configuration(object):
         self.headers = {'X-Cachet-Token': os.environ.get('CACHET_TOKEN') or self.data['cachet']['token']}
 
         self.endpoint_method = os.environ.get('ENDPOINT_METHOD') or self.data['endpoint']['method']
-        self.endpoint_url = os.environ.get('ENDPOINT_URL') or self.data['endpoint']['url']
-        self.endpoint_url = normalize_url(self.endpoint_url)
+        # self.endpoint_url = os.environ.get('ENDPOINT_URL') or self.data['endpoint']['url']
+        # self.endpoint_url = normalize_url(self.endpoint_url)
+        self.endpoint_urls = []
+        self.endpoint_urls.append("https://walker-atesvc2014-tdp-qdc.dckr.intuit.net/atesvc2014/v1/health")
+        self.endpoint_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/v1/health")
+        for i, url in enumerate(self.endpoint_urls):
+            self.endpoint_urls[i] = normalize_url(url)
+
+        self.num_urls = len(self.endpoint_urls)
 
         # added version url
-        self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
-        if self.endpoint_version_url:
-            self.endpoint_version_url = normalize_url(self.endpoint_version_url)
+        # self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
+        # if self.endpoint_version_url:
+            # self.endpoint_version_url = normalize_url(self.endpoint_version_url)
+        # store the build version
+        self.versions = []
+        self.endpoint_version_urls = []
+        self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
+        self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
+        for i, url in enumerate(self.endpoint_version_urls):
+            self.endpoint_version_urls[i] = normalize_url(url)
+            self.versions.append("")
 
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
-        self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
+        # self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
+        self.component_ids = [1, 2]
+
+        # ignore metric for now
         self.metric_id = os.environ.get('CACHET_METRIC_ID') or self.data['cachet'].get('metric_id')
 
         if self.metric_id is not None:
@@ -118,17 +137,21 @@ class Configuration(object):
         # We need the current status so we monitor the status changes. This is necessary for creating incidents.
         self.status = get_current_status(self.api_url, self.component_id, self.headers)
 
-        # store the build version
-        self.version = ""
-
         # Get remaining settings
         self.public_incidents = int(
             os.environ.get('CACHET_PUBLIC_INCIDENTS') or self.data['cachet']['public_incidents'])
 
-        self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, self.endpoint_url))
+        for endpoint_url in self.endpoint_urls:
+            self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
         self.expectations = [Expectaction.create(expectation) for expectation in self.data['endpoint']['expectation']]
         for expectation in self.expectations:
             self.logger.info('Registered expectation: %s' % (expectation,))
+        
+        # initialize other variables
+        self.current_timestamps = [-1 for i in range(self.num_urls)]
+        self.messages = ["" for i in range(self.num_urls)]
+        self.statuses = [-1 for i in range(self.num_urls)]
+        self.requests = [-1 for i in range(self.num_urls)]
 
     def get_default_metric_value(self, metric_id):
         """Returns default value for configured metric."""
@@ -162,12 +185,12 @@ class Configuration(object):
                 if sub_key not in self.data[key]:
                     configuration_errors.append('%s.%s' % (key, sub_key))
 
-        if ('endpoint' in self.data and 'expectation' in
-            self.data['endpoint']):
-            if (not isinstance(self.data['endpoint']['expectation'], list) or
-                    (isinstance(self.data['endpoint']['expectation'], list) and
-                             len(self.data['endpoint']['expectation']) == 0)):
-                configuration_errors.append('endpoint.expectation')
+        # if ('endpoint' in self.data and 'expectation' in
+        #     self.data['endpoint']):
+        #     if (not isinstance(self.data['endpoint']['expectation'], list) or
+        #             (isinstance(self.data['endpoint']['expectation'], list) and
+        #                      len(self.data['endpoint']['expectation']) == 0)):
+        #         configuration_errors.append('endpoint.expectation')
 
         if len(configuration_errors) > 0:
             raise ConfigurationValidationError(
@@ -179,44 +202,45 @@ class Configuration(object):
         each one of the expectations, one by one. The status will be updated
         according to the expectation results.
         """
-        try:
-            self.request = requests.request(self.endpoint_method, self.endpoint_url, timeout=self.endpoint_timeout)
-            self.current_timestamp = int(time.time())
-        except requests.ConnectionError:
-            self.message = 'The URL is unreachable: %s %s' % (self.endpoint_method, self.endpoint_url)
-            self.logger.warning(self.message)
-            self.status = st.COMPONENT_STATUS_PARTIAL_OUTAGE
-            return
-        except requests.HTTPError:
-            self.message = 'Unexpected HTTP response'
-            self.logger.exception(self.message)
-            self.status = st.COMPONENT_STATUS_PARTIAL_OUTAGE
-            return
-        except requests.Timeout:
-            self.message = 'Request timed out'
-            self.logger.warning(self.message)
-            self.status = st.COMPONENT_STATUS_PERFORMANCE_ISSUES
-            return
+        for i in range(self.num_urls):
+            try:
+                self.requests[i] = requests.request(self.endpoint_method, self.endpoint_urls[i], timeout=self.endpoint_timeout)
+                self.current_timestamps[i] = int(time.time())
+            except requests.ConnectionError:
+                self.messages[i] = 'The URL is unreachable: %s %s' % (self.endpoint_method, self.endpoint_urls[i])
+                self.logger.warning(self.messages[i])
+                self.statuses[i] = st.COMPONENT_STATUS_PARTIAL_OUTAGE
+                return
+            except requests.HTTPError:
+                self.messages[i] = 'Unexpected HTTP response'
+                self.logger.exception(self.message)
+                self.statuses[i] = st.COMPONENT_STATUS_PARTIAL_OUTAGE
+                return
+            except requests.Timeout:
+                self.messages[i] = 'Request timed out'
+                self.logger.warning(self.message)
+                self.statuses[i] = st.COMPONENT_STATUS_PERFORMANCE_ISSUES
+                return
 
-        # obtain the build version
-        if (self.endpoint_version_url):
-            r = requests.get(self.endpoint_version_url)
-            if r.status_code == requests.codes.ok:
-                self.version = r.text.split('-->')[0]
-            else:
-                self.version = 'Unknown'
+            # obtain the build version
+            # if (self.endpoint_version_url):
+            #     r = requests.get(self.endpoint_version_url)
+            #     if r.status_code == requests.codes.ok:
+            #         self.version = r.text.split('-->')[0]
+            #     else:
+            #         self.version = 'Unknown'
 
-        # We initially assume the API is healthy.
-        self.status = st.COMPONENT_STATUS_OPERATIONAL
-        self.message = ''
-        for expectation in self.expectations:
-            status = expectation.get_status(self.request)
+            # We initially assume the API is healthy.
+            self.statuses[i] = st.COMPONENT_STATUS_OPERATIONAL
+            self.messages[i] = ''
+            for expectation in self.expectations:
+                status = expectation.get_status(self.requests[i])
 
-            # The greater the status is, the worse the state of the API is.
-            if status > self.status:
-                self.status = status
-                self.message = expectation.get_message(self.request)
-                self.logger.info(self.message)
+                # The greater the status is, the worse the state of the API is.
+                if status > self.statuses[i]:
+                    self.statuses[i] = status
+                    self.messages[i] = expectation.get_message(self.requests[i])
+                    self.logger.info(self.messages[i])
 
     def print_out(self):
         self.logger.info('Current configuration:\n%s' % (self.__repr__()))
@@ -255,7 +279,6 @@ class Configuration(object):
         if component_request.ok:
             # Successful update
             self.logger.info('Component update: status [%d]' % (self.status,))
-            # self.logger.info('I am here hungry and waiting for lunch.')
         else:
             # Failed to update the API status
             self.logger.warning('Component update failed with status [%d]: API'
