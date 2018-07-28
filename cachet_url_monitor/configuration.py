@@ -135,7 +135,7 @@ class Configuration(object):
         self.latency_unit = os.environ.get('LATENCY_UNIT') or self.data['cachet'].get('latency_unit') or 's'
 
         # We need the current status so we monitor the status changes. This is necessary for creating incidents.
-        self.status = get_current_status(self.api_url, self.component_id, self.headers)
+        # self.status = get_current_status(self.api_url, self.component_id, self.headers)
 
         # Get remaining settings
         self.public_incidents = int(
@@ -150,8 +150,11 @@ class Configuration(object):
         # initialize other variables
         self.current_timestamps = [-1 for i in range(self.num_urls)]
         self.messages = ["" for i in range(self.num_urls)]
-        self.statuses = [-1 for i in range(self.num_urls)]
+        self.statuses = [get_current_status(self.api_url, self.component_ids[i], self.headers) for i in range(self.num_urls)]
         self.requests = [-1 for i in range(self.num_urls)]
+        self.trigger_updates = [False for i in range(self.num_urls)] 
+        self.current_fails = [0 for i in range(self.num_urls)]
+        self.incident_ids = [-1 for i in range(self.num_urls)]
 
     def get_default_metric_value(self, metric_id):
         """Returns default value for configured metric."""
@@ -213,12 +216,12 @@ class Configuration(object):
                 return
             except requests.HTTPError:
                 self.messages[i] = 'Unexpected HTTP response'
-                self.logger.exception(self.message)
+                self.logger.exception(self.messages[i])
                 self.statuses[i] = st.COMPONENT_STATUS_PARTIAL_OUTAGE
                 return
             except requests.Timeout:
                 self.messages[i] = 'Request timed out'
-                self.logger.warning(self.message)
+                self.logger.warning(self.messages[i])
                 self.statuses[i] = st.COMPONENT_STATUS_PERFORMANCE_ISSUES
                 return
 
@@ -256,33 +259,34 @@ class Configuration(object):
         Checks if update should be triggered - trigger it for all operational states
         and only for non-operational ones above the configured threshold (allowed_fails).
         """
-
-        if self.status != 1:
-            self.current_fails = self.current_fails + 1
-            self.logger.info('Failure #%s with threshold set to %s' % (self.current_fails, self.allowed_fails))
-            if self.current_fails <= self.allowed_fails:
-                self.trigger_update = False
-                return
-        self.current_fails = 0
-        self.trigger_update = True
+        for i in range(self.num_urls):
+            if self.statuses[i] != 1:
+                self.current_fails[i] = self.current_fails[i] + 1
+                self.logger.info('Failure #%s with threshold set to %s' % (self.current_fails[i], self.allowed_fails))
+                if self.current_fails[i] <= self.allowed_fails:
+                    self.trigger_updates[i] = False
+                    return
+            self.current_fails[i] = 0
+            self.trigger_updates[i] = True
 
     def push_status(self):
         """Pushes the status of the component to the cachet server. It will update the component
         status based on the previous call to evaluate().
         """
-        if not self.trigger_update:
-            return
-        # added push version number to the description        
-        params = {'id': self.component_id, 'status': self.status, 'description': self.version}
-        component_request = requests.put('%s/components/%d' % (self.api_url, self.component_id), params=params,
-                                         headers=self.headers)
-        if component_request.ok:
-            # Successful update
-            self.logger.info('Component update: status [%d]' % (self.status,))
-        else:
-            # Failed to update the API status
-            self.logger.warning('Component update failed with status [%d]: API'
-                                ' status: [%d]' % (component_request.status_code, self.status))
+        for i in range(self.num_urls):
+            if not self.trigger_update:
+                return
+            # added push version number to the description        
+            params = {'id': self.component_ids[i], 'status': self.statuses[i], 'description': self.versions[i]}
+            component_request = requests.put('%s/components/%d' % (self.api_url, self.component_ids[i]), params=params,
+                                            headers=self.headers)
+            if component_request.ok:
+                # Successful update
+                self.logger.info('Component %d update: status [%d]' % (self.component_ids[i], self.statuses[i],))
+            else:
+                # Failed to update the API status
+                self.logger.warning('Component %d update failed with status [%d]: API'
+                                    ' status: [%d]' % (self.component_ids[i], component_request.status_code, self.statuses[i]))
 
     def push_metrics(self):
         """Pushes the total amount of seconds the request took to get a response from the URL.
@@ -309,40 +313,44 @@ class Configuration(object):
         """If the component status has changed, we create a new incident (if this is the first time it becomes unstable)
         or updates the existing incident once it becomes healthy again.
         """
-        if not self.trigger_update:
-            return
-        if hasattr(self, 'incident_id') and self.status == st.COMPONENT_STATUS_OPERATIONAL:
-            # If the incident already exists, it means it was unhealthy but now it's healthy again.
-            params = {'status': 4, 'visible': self.public_incidents, 'component_id': self.component_id,
-                      'component_status': self.status,
-                      'notify': True}
+        for i in range(self.num_urls):
+            if not self.trigger_updates[i]:
+                return
+            # if hasattr(self, 'incident_id') and self.statuses[i] == st.COMPONENT_STATUS_OPERATIONAL:
+            if self.incident_ids[i] != -1 and self.statuses[i] == st.COMPONENT_STATUS_OPERATIONAL:
+                # If the incident already exists, it means it was unhealthy but now it's healthy again.
+                params = {'status': 4, 'visible': self.public_incidents, 'component_id': self.component_ids[i],
+                        'component_status': self.statuses[i],
+                        'notify': True}
 
-            incident_request = requests.put('%s/incidents/%d' % (self.api_url, self.incident_id), params=params,
-                                            headers=self.headers)
-            if incident_request.ok:
-                # Successful metrics upload
-                self.logger.info(
-                    'Incident updated, API healthy again: component status [%d], message: "%s"' % (
-                        self.status, self.message))
-                del self.incident_id
-            else:
-                self.logger.warning('Incident update failed with status [%d], message: "%s"' % (
-                    incident_request.status_code, self.message))
-        elif not hasattr(self, 'incident_id') and self.status != st.COMPONENT_STATUS_OPERATIONAL:
-            # This is the first time the incident is being created.
-            params = {'name': 'URL unavailable', 'message': self.message, 'status': 1, 'visible': self.public_incidents,
-                      'component_id': self.component_id, 'component_status': self.status, 'notify': True}
-            incident_request = requests.post('%s/incidents' % (self.api_url,), params=params, headers=self.headers)
-            if incident_request.ok:
-                # Successful incident upload.
-                self.incident_id = incident_request.json()['data']['id']
-                self.logger.info(
-                    'Incident uploaded, API unhealthy: component status [%d], message: "%s"' % (
-                        self.status, self.message))
-            else:
-                self.logger.warning(
-                    'Incident upload failed with status [%d], message: "%s"' % (
-                        incident_request.status_code, self.message))
+                incident_request = requests.put('%s/incidents/%d' % (self.api_url, self.incident_ids[i]), params=params,
+                                                headers=self.headers)
+                if incident_request.ok:
+                    # Successful metrics upload
+                    self.logger.info(
+                        'Incident updated, API healthy again: component status [%d], message: "%s"' % (
+                            self.statuses[i], self.messages[i]))
+                    # del self.incident_id
+                    self.incident_ids[i] = -1
+                else:
+                    self.logger.warning('Incident update failed with status [%d], message: "%s"' % (
+                        incident_request.status_code, self.messages[i]))
+            # elif not hasattr(self, 'incident_id') and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
+            elif self.incident_ids[i] != -1 and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
+                # This is the first time the incident is being created.
+                params = {'name': 'URL unavailable', 'message': self.messages[i], 'status': 1, 'visible': self.public_incidents,
+                        'component_id': self.component_ids[i], 'component_status': self.statuses[i], 'notify': True}
+                incident_request = requests.post('%s/incidents' % (self.api_url,), params=params, headers=self.headers)
+                if incident_request.ok:
+                    # Successful incident upload.
+                    self.incident_ids[i] = incident_request.json()['data']['id']
+                    self.logger.info(
+                        'Incident uploaded, API unhealthy: component status [%d], message: "%s"' % (
+                            self.statuses[i], self.messages[i]))
+                else:
+                    self.logger.warning(
+                        'Incident upload failed with status [%d], message: "%s"' % (
+                            incident_request.status_code, self.messages[i]))
 
 
 class Expectaction(object):
