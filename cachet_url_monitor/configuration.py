@@ -20,7 +20,8 @@ configuration_mandatory_fields = {
     'endpoint': ['method', 'timeout', 'expectation'],
     # 'cachet': ['api_url', 'token', 'component_id'],
     'cachet': ['api_url', 'token'],
-    'frequency': []}
+    'frequency': [],
+    'update_urls_frequency': []}
 
 
 class ConfigurationValidationError(Exception):
@@ -83,8 +84,8 @@ class Configuration(object):
         self.logger = logging.getLogger('cachet_url_monitor.configuration.Configuration')
         self.config_file = config_file
         self.data = load(file(self.config_file, 'r'))
-        self.current_fails = 0
-        self.trigger_update = True
+        # self.current_fails = 0
+        # self.trigger_update = True
 
         # Exposing the configuration to confirm it's parsed as expected.
         self.print_out()
@@ -168,6 +169,12 @@ class Configuration(object):
             return get_metric_request.json()['data']['default_value']
         else:
             raise MetricNonexistentError(metric_id)
+    
+    def get_monitoring_urls(self):
+        """Obtains the Cachet components and match them to the corresponding urls.
+        We only check the urls and update the components found.
+        """
+        self.logger.info('Hello from Tri.')
 
     def get_action(self):
         """Retrieves the action list from the configuration. If it's empty, returns an empty list.

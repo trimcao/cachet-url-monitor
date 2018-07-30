@@ -18,6 +18,7 @@ class Agent(object):
         if decorators is None:
             decorators = []
         self.decorators = decorators
+        self.count = 0
 
     def execute(self):
         """Will verify the API status and push the status and metrics to the
@@ -29,10 +30,19 @@ class Agent(object):
 
         for decorator in self.decorators:
             decorator.execute(self.configuration)
+    
+    def update_urls(self):
+        self.configuration.get_monitoring_urls()
+        # if self.count >= 20:
+        #     self.execute()
+        #     self.count = 0
+        # else:
+        #     self.count += 1
 
     def start(self):
         """Sets up the schedule based on the configuration file."""
         schedule.every(self.configuration.data['frequency']).seconds.do(self.execute)
+        schedule.every(self.configuration.data['update_urls_frequency']).seconds.do(self.update_urls)
 
 
 class Decorator(object):
@@ -74,7 +84,9 @@ class Scheduler(object):
         self.logger.info('Starting monitor agent...')
         while not self.stop:
             schedule.run_pending()
-            time.sleep(self.configuration.data['frequency'])
+            # time.sleep(self.configuration.data['frequency'])
+            # we want to run two jobs, so we don't set sleep here.
+            time.sleep(1)
 
 
 if __name__ == "__main__":
