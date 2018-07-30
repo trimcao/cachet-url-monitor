@@ -26,8 +26,10 @@ configuration_mandatory_fields = {
 
 INTUIT_PREPROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_preprod-"
 INTUIT_PROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_prod-"
-INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL, INTUIT_PROD_WALKER_URL]
+# INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL, INTUIT_PROD_WALKER_URL]
+INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL]
 CENTERS = ["qdc", "lvdc"]
+# CENTERS = ["lvdc"]
 
 class ConfigurationValidationError(Exception):
     """Exception raised when there's a validation error."""
@@ -111,7 +113,6 @@ class Configuration(object):
         # for i, url in enumerate(self.endpoint_urls):
             # self.endpoint_urls[i] = normalize_url(url)
 
-        self.num_urls = len(self.endpoint_urls)
 
         # added version url
         # self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
@@ -123,21 +124,22 @@ class Configuration(object):
         # self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
         # self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
         # self.endpoint_version_urls.append("")
-        for i, url in enumerate(self.endpoint_version_urls):
-            if self.endpoint_version_urls[i]:
-                self.endpoint_version_urls[i] = normalize_url(url)
-            self.versions.append("")
+
+        # for i, url in enumerate(self.endpoint_version_urls):
+            # if self.endpoint_version_urls[i]:
+                # self.endpoint_version_urls[i] = normalize_url(url)
+            # self.versions.append("")
 
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
         # self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
+        # self.component_ids = [1, 2, 3]
+        self.component_ids = []
+
         self.get_monitoring_urls()
-        quit()
-
-        self.component_ids = [1, 2, 3]
-
+        self.num_urls = len(self.endpoint_urls)
         # ignore metric for now
         self.metric_id = os.environ.get('CACHET_METRIC_ID') or self.data['cachet'].get('metric_id')
 
@@ -168,6 +170,7 @@ class Configuration(object):
         self.trigger_updates = [False for i in range(self.num_urls)] 
         self.current_fails = [0 for i in range(self.num_urls)]
         self.incident_ids = [-1 for i in range(self.num_urls)]
+        self.versions = ["" for i in range(self.num_urls)]
 
     def get_default_metric_value(self, metric_id):
         """Returns default value for configured metric."""
@@ -196,11 +199,15 @@ class Configuration(object):
                 # print data
                 for each_entry in data:
                     name = each_entry['name']
-                    if not '_' in name: 
+                    check_url = each_entry['url']
+                    env = each_entry['env']
+                    if not 'overlay' in name and not 'walker' in name: 
+                        # special case when env is prd because we may have multiple prd environments       
+                        if env == 'prd':
+                            name, env_num = name.split('_')
+                            env = env + env_num[-1]
                         if not name in self.intuit_db[center]:
                             self.intuit_db[center][name] = {}
-                        check_url = each_entry['url']
-                        env = each_entry['env']
                         self.intuit_db[center][name][env] = {}
                         self.intuit_db[center][name][env]['url'] = check_url
                         if 'version_url' in each_entry:
@@ -222,10 +229,26 @@ class Configuration(object):
                 self.cachet_db[data_center][svc_name] = {}
             self.cachet_db[data_center][svc_name][env] = each_entry['id']
         
-        print self.intuit_db
-        print self.cachet_db
+        # print self.intuit_db
+        # print self.cachet_db
 
-
+        # match the URLs
+        self.component_ids = []
+        self.endpoint_urls = []
+        self.endpoint_version_urls = []
+        for center in CENTERS:
+            for svc in self.cachet_db[center]:
+                for env in self.cachet_db[center][svc]:
+                    if svc in self.intuit_db[center]:
+                        if env in self.intuit_db[center][svc]:
+                            self.component_ids.append(self.cachet_db[center][svc][env])
+                            self.endpoint_urls.append(self.intuit_db[center][svc][env]['url'])
+                            self.endpoint_version_urls.append(self.intuit_db[center][svc][env]['version_url'])
+        
+        self.num_urls = len(self.component_ids)
+        # print "Number of urls:", self.num_urls
+        # for i in range(self.num_urls):
+            # print self.component_ids[i], self.endpoint_urls[i], self.endpoint_version_urls[i]
         
 
     def get_action(self):
