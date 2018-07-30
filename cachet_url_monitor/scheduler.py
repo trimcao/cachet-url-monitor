@@ -33,11 +33,6 @@ class Agent(object):
     
     def update_urls(self):
         self.configuration.get_monitoring_urls()
-        # if self.count >= 20:
-        #     self.execute()
-        #     self.count = 0
-        # else:
-        #     self.count += 1
 
     def start(self):
         """Sets up the schedule based on the configuration file."""

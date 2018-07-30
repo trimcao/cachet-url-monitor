@@ -9,6 +9,7 @@ import time
 import requests
 from yaml import dump
 from yaml import load
+import json
 
 import latency_unit
 import status as st
@@ -23,6 +24,10 @@ configuration_mandatory_fields = {
     'frequency': [],
     'update_urls_frequency': []}
 
+INTUIT_PREPROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_preprod-"
+INTUIT_PROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_prod-"
+INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL, INTUIT_PROD_WALKER_URL]
+CENTERS = ["qdc", "lvdc"]
 
 class ConfigurationValidationError(Exception):
     """Exception raised when there's a validation error."""
@@ -100,11 +105,11 @@ class Configuration(object):
         # self.endpoint_url = os.environ.get('ENDPOINT_URL') or self.data['endpoint']['url']
         # self.endpoint_url = normalize_url(self.endpoint_url)
         self.endpoint_urls = []
-        self.endpoint_urls.append("https://walker-atesvc2014-tdp-qdc.dckr.intuit.net/atesvc2014/v1/health")
-        self.endpoint_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/v1/health")
-        self.endpoint_urls.append("https://www.google.com/")
-        for i, url in enumerate(self.endpoint_urls):
-            self.endpoint_urls[i] = normalize_url(url)
+        # self.endpoint_urls.append("https://walker-atesvc2014-tdp-qdc.dckr.intuit.net/atesvc2014/v1/health")
+        # self.endpoint_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/v1/health")
+        # self.endpoint_urls.append("https://www.google.com/")
+        # for i, url in enumerate(self.endpoint_urls):
+            # self.endpoint_urls[i] = normalize_url(url)
 
         self.num_urls = len(self.endpoint_urls)
 
@@ -115,9 +120,9 @@ class Configuration(object):
         # store the build version
         self.versions = []
         self.endpoint_version_urls = []
-        self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
-        self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
-        self.endpoint_version_urls.append("")
+        # self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
+        # self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
+        # self.endpoint_version_urls.append("")
         for i, url in enumerate(self.endpoint_version_urls):
             if self.endpoint_version_urls[i]:
                 self.endpoint_version_urls[i] = normalize_url(url)
@@ -128,6 +133,9 @@ class Configuration(object):
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
         # self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
+        self.get_monitoring_urls()
+        quit()
+
         self.component_ids = [1, 2, 3]
 
         # ignore metric for now
@@ -174,7 +182,51 @@ class Configuration(object):
         """Obtains the Cachet components and match them to the corresponding urls.
         We only check the urls and update the components found.
         """
-        self.logger.info('Hello from Tri.')
+        # build Intuit URLs database
+        self.logger.info('Updating components and monitoring urls...')
+        self.intuit_db = {}
+        headers = {'authorization': 'Intuit_IAM_Authentication intuit_appid=Intuit.platform.pcgops-web.pcgopsweb, intuit_app_secret=prdnOkZSA08TRkxqA8uADHs50jtMvqwaEiH3RXSI'}
+        for center in CENTERS:
+            for url in INTUIT_URLS: 
+                url_center = url + center + ".yaml"
+                response = requests.request("GET", url_center, headers=headers)
+                data = load(response.text)
+                if not center in self.intuit_db:
+                    self.intuit_db[center] = {} 
+                # print data
+                for each_entry in data:
+                    name = each_entry['name']
+                    if not '_' in name: 
+                        if not name in self.intuit_db[center]:
+                            self.intuit_db[center][name] = {}
+                        check_url = each_entry['url']
+                        env = each_entry['env']
+                        self.intuit_db[center][name][env] = {}
+                        self.intuit_db[center][name][env]['url'] = check_url
+                        if 'version_url' in each_entry:
+                            self.intuit_db[center][name][env]['version_url'] = each_entry['version_url']
+                        else:
+                            self.intuit_db[center][name][env]['version_url'] = ''
+        
+        # build Cachet Component database
+        url = self.api_url + '/components'
+        response = requests.request("GET", url)
+        data = json.loads(response.text)
+        self.cachet_db= {}
+        for center in CENTERS:
+            self.cachet_db[center] = {}
+        for each_entry in data['data']:
+            name = each_entry['name']
+            svc_name, data_center, env = name.split('-')
+            if not svc_name in self.cachet_db:
+                self.cachet_db[data_center][svc_name] = {}
+            self.cachet_db[data_center][svc_name][env] = each_entry['id']
+        
+        print self.intuit_db
+        print self.cachet_db
+
+
+        
 
     def get_action(self):
         """Retrieves the action list from the configuration. If it's empty, returns an empty list.
