@@ -307,10 +307,11 @@ class Configuration(object):
             if self.endpoint_version_urls[i]:
                 r = requests.get(self.endpoint_version_urls[i])
                 if r.status_code == requests.codes.ok:
-                    self.versions[i] = r.text.split('-->')[0]
+                    build_version = r.text.split(' --> ')[0]
+                    self.versions[i] = build_version.split(':')[1]
                 else:
                     self.versions[i] = 'Unknown'
-            print 'service:', self.component_names[i], 'version url:', self.endpoint_version_urls[i]
+            print 'service:', self.component_names[i], 'version:', self.versions[i]
 
             # We initially assume the API is healthy.
             self.statuses[i] = st.COMPONENT_STATUS_OPERATIONAL
