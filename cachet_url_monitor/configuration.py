@@ -91,8 +91,6 @@ class Configuration(object):
         self.logger = logging.getLogger('cachet_url_monitor.configuration.Configuration')
         self.config_file = config_file
         self.data = load(file(self.config_file, 'r'))
-        # self.current_fails = 0
-        # self.trigger_update = True
 
         # Exposing the configuration to confirm it's parsed as expected.
         self.print_out()
@@ -104,42 +102,20 @@ class Configuration(object):
         self.headers = {'X-Cachet-Token': os.environ.get('CACHET_TOKEN') or self.data['cachet']['token']}
 
         self.endpoint_method = os.environ.get('ENDPOINT_METHOD') or self.data['endpoint']['method']
-        # self.endpoint_url = os.environ.get('ENDPOINT_URL') or self.data['endpoint']['url']
-        # self.endpoint_url = normalize_url(self.endpoint_url)
-        self.endpoint_urls = []
-        # self.endpoint_urls.append("https://walker-atesvc2014-tdp-qdc.dckr.intuit.net/atesvc2014/v1/health")
-        # self.endpoint_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/v1/health")
-        # self.endpoint_urls.append("https://www.google.com/")
-        # for i, url in enumerate(self.endpoint_urls):
-            # self.endpoint_urls[i] = normalize_url(url)
 
-
-        # added version url
-        # self.endpoint_version_url = os.environ.get('ENDPOINT_VERSION_URL') or self.data['endpoint']['version_url']
-        # if self.endpoint_version_url:
-            # self.endpoint_version_url = normalize_url(self.endpoint_version_url)
+        # self.endpoint_urls = []
         # store the build version
-        self.versions = []
-        self.endpoint_version_urls = []
-        # self.endpoint_version_urls.append("https://walker-atesvc2014-e2e-qdc.dckr.intuit.net/atesvc2014/version.txt")
-        # self.endpoint_version_urls.append("https://walker-atesvc2015-e2e-qdc.dckr.intuit.net/atesvc2015/version.txt")
-        # self.endpoint_version_urls.append("")
-
-        # for i, url in enumerate(self.endpoint_version_urls):
-            # if self.endpoint_version_urls[i]:
-                # self.endpoint_version_urls[i] = normalize_url(url)
-            # self.versions.append("")
+        # self.endpoint_version_urls = []
 
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
-        # self.component_id = os.environ.get('CACHET_COMPONENT_ID') or self.data['cachet']['component_id']
-        # self.component_ids = [1, 2, 3]
-        self.component_ids = []
+        # self.component_ids = []
 
         self.get_monitoring_urls()
-        self.num_urls = len(self.endpoint_urls)
+        # self.num_urls = len(self.endpoint_urls)
+
         # ignore metric for now
         self.metric_id = os.environ.get('CACHET_METRIC_ID') or self.data['cachet'].get('metric_id')
 
@@ -156,8 +132,6 @@ class Configuration(object):
         self.public_incidents = int(
             os.environ.get('CACHET_PUBLIC_INCIDENTS') or self.data['cachet']['public_incidents'])
 
-        for endpoint_url in self.endpoint_urls:
-            self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
         self.expectations = [Expectaction.create(expectation) for expectation in self.data['endpoint']['expectation']]
         for expectation in self.expectations:
             self.logger.info('Registered expectation: %s' % (expectation,))
@@ -229,11 +203,9 @@ class Configuration(object):
                 self.cachet_db[data_center][svc_name] = {}
             self.cachet_db[data_center][svc_name][env] = each_entry['id']
         
-        # print self.intuit_db
-        # print self.cachet_db
-
         # match the URLs
         self.component_ids = []
+        self.component_names = []
         self.endpoint_urls = []
         self.endpoint_version_urls = []
         for center in CENTERS:
@@ -242,6 +214,7 @@ class Configuration(object):
                     if svc in self.intuit_db[center]:
                         if env in self.intuit_db[center][svc]:
                             self.component_ids.append(self.cachet_db[center][svc][env])
+                            self.component_names.append('-'.join([svc, center, env]))
                             self.endpoint_urls.append(self.intuit_db[center][svc][env]['url'])
                             self.endpoint_version_urls.append(self.intuit_db[center][svc][env]['version_url'])
         
@@ -249,7 +222,24 @@ class Configuration(object):
         # print "Number of urls:", self.num_urls
         # for i in range(self.num_urls):
             # print self.component_ids[i], self.endpoint_urls[i], self.endpoint_version_urls[i]
+        for endpoint_url in self.endpoint_urls:
+            self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
         
+    def update_urls(self):
+        """ Call get_monitoring_urls() to update the urls and re-initialize the variables related
+        to status of each component.
+        """
+        self.get_monitoring_urls()
+        # initialize other variables
+        self.current_timestamps = [-1 for i in range(self.num_urls)]
+        self.messages = ["" for i in range(self.num_urls)]
+        self.statuses = [get_current_status(self.api_url, self.component_ids[i], self.headers) for i in range(self.num_urls)]
+        self.requests = [-1 for i in range(self.num_urls)]
+        self.trigger_updates = [False for i in range(self.num_urls)] 
+        self.current_fails = [0 for i in range(self.num_urls)]
+        self.incident_ids = [-1 for i in range(self.num_urls)]
+        self.versions = ["" for i in range(self.num_urls)]
+
 
     def get_action(self):
         """Retrieves the action list from the configuration. If it's empty, returns an empty list.
@@ -369,7 +359,7 @@ class Configuration(object):
                                             headers=self.headers)
             if component_request.ok:
                 # Successful update
-                self.logger.info('Component %d update: status [%d]' % (self.component_ids[i], self.statuses[i],))
+                self.logger.info('Component %s [id %d] update: status [%d]' % (self.component_names[i], self.component_ids[i], self.statuses[i],))
             else:
                 # Failed to update the API status
                 self.logger.warning('Component %d update failed with status [%d]: API'

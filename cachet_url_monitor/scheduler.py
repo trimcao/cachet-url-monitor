@@ -32,7 +32,7 @@ class Agent(object):
             decorator.execute(self.configuration)
     
     def update_urls(self):
-        self.configuration.get_monitoring_urls()
+        self.configuration.update_urls()
 
     def start(self):
         """Sets up the schedule based on the configuration file."""
