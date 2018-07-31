@@ -162,7 +162,6 @@ class Configuration(object):
                 data = load(response.text)
                 if not center in self.intuit_db:
                     self.intuit_db[center] = {} 
-                # print data
                 for each_entry in data:
                     name = each_entry['name']
                     check_url = each_entry['url']
@@ -199,12 +198,6 @@ class Configuration(object):
                 self.cachet_db[data_center][svc_name][env] = each_entry['id']
             url = data['meta']['pagination']['links']['next_page']
         
-
-        # print self.intuit_db
-        # print
-        # print self.cachet_db
-        # print self.intuit_db['qdc']['atesvc2017']
-
         # match the URLs
         # only component with URL matched will be monitored for this period
         # URL matching will be updated periodically (like every 6 hours)
@@ -224,8 +217,14 @@ class Configuration(object):
         
         self.num_urls = len(self.component_ids)
         print 'Number of URLs:', self.num_urls
+        # print self.endpoint_version_urls
+        
+        # for i in range(self.num_urls):
+            # print 'service:', self.component_names[i], 'version url:', self.endpoint_version_urls[i]
+        
         for endpoint_url in self.endpoint_urls:
             self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
+        
         
     def update_urls(self):
         """ Call get_monitoring_urls() to update the urls and re-initialize the variables related
@@ -292,25 +291,26 @@ class Configuration(object):
                 self.messages[i] = 'The URL is unreachable: %s %s' % (self.endpoint_method, self.endpoint_urls[i])
                 self.logger.warning(self.messages[i])
                 self.statuses[i] = st.COMPONENT_STATUS_PARTIAL_OUTAGE
-                return
+                continue
             except requests.HTTPError:
                 self.messages[i] = 'Unexpected HTTP response'
                 self.logger.exception(self.messages[i])
                 self.statuses[i] = st.COMPONENT_STATUS_PARTIAL_OUTAGE
-                return
+                continue
             except requests.Timeout:
                 self.messages[i] = 'Request timed out'
                 self.logger.warning(self.messages[i])
                 self.statuses[i] = st.COMPONENT_STATUS_PERFORMANCE_ISSUES
-                return
+                continue
 
             # obtain the build version
-            if (self.endpoint_version_urls[i]):
+            if self.endpoint_version_urls[i]:
                 r = requests.get(self.endpoint_version_urls[i])
                 if r.status_code == requests.codes.ok:
                     self.versions[i] = r.text.split('-->')[0]
                 else:
                     self.versions[i] = 'Unknown'
+            print 'service:', self.component_names[i], 'version url:', self.endpoint_version_urls[i]
 
             # We initially assume the API is healthy.
             self.statuses[i] = st.COMPONENT_STATUS_OPERATIONAL
