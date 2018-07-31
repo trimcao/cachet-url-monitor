@@ -17,17 +17,15 @@ import status as st
 # This is the mandatory fields that must be in the configuration file in this
 # same exact structure.
 configuration_mandatory_fields = {
-    # 'endpoint': ['url', 'method', 'timeout', 'expectation'],
     'endpoint': ['method', 'timeout', 'expectation'],
-    # 'cachet': ['api_url', 'token', 'component_id'],
     'cachet': ['api_url', 'token'],
     'frequency': [],
     'update_urls_frequency': []}
 
 INTUIT_PREPROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_preprod-"
 INTUIT_PROD_WALKER_URL = "https://config.api.intuit.net/v2/pcgopsweb_walker_prod-"
-# INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL, INTUIT_PROD_WALKER_URL]
-INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL]
+INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL, INTUIT_PROD_WALKER_URL]
+# INTUIT_URLS = [INTUIT_PREPROD_WALKER_URL]
 CENTERS = ["qdc", "lvdc"]
 # CENTERS = ["lvdc"]
 
@@ -103,18 +101,13 @@ class Configuration(object):
 
         self.endpoint_method = os.environ.get('ENDPOINT_METHOD') or self.data['endpoint']['method']
 
-        # self.endpoint_urls = []
-        # store the build version
-        # self.endpoint_version_urls = []
-
         self.endpoint_timeout = os.environ.get('ENDPOINT_TIMEOUT') or self.data['endpoint'].get('timeout') or 1
         self.allowed_fails = os.environ.get('ALLOWED_FAILS') or self.data['endpoint'].get('allowed_fails') or 0
 
         self.api_url = os.environ.get('CACHET_API_URL') or self.data['cachet']['api_url']
-        # self.component_ids = []
 
+        # get the urls we will monitor
         self.get_monitoring_urls()
-        # self.num_urls = len(self.endpoint_urls)
 
         # ignore metric for now
         self.metric_id = os.environ.get('CACHET_METRIC_ID') or self.data['cachet'].get('metric_id')
@@ -124,9 +117,6 @@ class Configuration(object):
 
         # The latency_unit configuration is not mandatory and we fallback to seconds, by default.
         self.latency_unit = os.environ.get('LATENCY_UNIT') or self.data['cachet'].get('latency_unit') or 's'
-
-        # We need the current status so we monitor the status changes. This is necessary for creating incidents.
-        # self.status = get_current_status(self.api_url, self.component_id, self.headers)
 
         # Get remaining settings
         self.public_incidents = int(
@@ -139,6 +129,7 @@ class Configuration(object):
         # initialize other variables
         self.current_timestamps = [-1 for i in range(self.num_urls)]
         self.messages = ["" for i in range(self.num_urls)]
+        # We need the current status so we monitor the status changes. This is necessary for creating incidents.
         self.statuses = [get_current_status(self.api_url, self.component_ids[i], self.headers) for i in range(self.num_urls)]
         self.requests = [-1 for i in range(self.num_urls)]
         self.trigger_updates = [False for i in range(self.num_urls)] 
@@ -159,8 +150,9 @@ class Configuration(object):
         """Obtains the Cachet components and match them to the corresponding urls.
         We only check the urls and update the components found.
         """
-        # build Intuit URLs database
         self.logger.info('Updating components and monitoring urls...')
+        # build Intuit URLs database
+        # obtain urls from the yaml files on github
         self.intuit_db = {}
         headers = {'authorization': 'Intuit_IAM_Authentication intuit_appid=Intuit.platform.pcgops-web.pcgopsweb, intuit_app_secret=prdnOkZSA08TRkxqA8uADHs50jtMvqwaEiH3RXSI'}
         for center in CENTERS:
@@ -175,7 +167,7 @@ class Configuration(object):
                     name = each_entry['name']
                     check_url = each_entry['url']
                     env = each_entry['env']
-                    if not 'overlay' in name and not 'walker' in name: 
+                    if not 'overlay' in name: 
                         # special case when env is prd because we may have multiple prd environments       
                         if env == 'prd':
                             name, env_num = name.split('_')
@@ -190,20 +182,32 @@ class Configuration(object):
                             self.intuit_db[center][name][env]['version_url'] = ''
         
         # build Cachet Component database
-        url = self.api_url + '/components'
-        response = requests.request("GET", url)
-        data = json.loads(response.text)
+        # read the components from Cachet API
         self.cachet_db= {}
-        for center in CENTERS:
-            self.cachet_db[center] = {}
-        for each_entry in data['data']:
-            name = each_entry['name']
-            svc_name, data_center, env = name.split('-')
-            if not svc_name in self.cachet_db:
-                self.cachet_db[data_center][svc_name] = {}
-            self.cachet_db[data_center][svc_name][env] = each_entry['id']
+        for data_center in CENTERS:
+            self.cachet_db[data_center] = {}
+        # need to fetch page by page, one page only lists 20 components
+        url = self.api_url + '/components'
+        while url:
+            response = requests.request("GET", url)
+            data = json.loads(response.text)
+            for each_entry in data['data']:
+                name = each_entry['name']
+                svc_name, data_center, env = name.split('-')
+                if not svc_name in self.cachet_db[data_center]:
+                    self.cachet_db[data_center][svc_name] = {}
+                self.cachet_db[data_center][svc_name][env] = each_entry['id']
+            url = data['meta']['pagination']['links']['next_page']
         
+
+        # print self.intuit_db
+        # print
+        # print self.cachet_db
+        # print self.intuit_db['qdc']['atesvc2017']
+
         # match the URLs
+        # only component with URL matched will be monitored for this period
+        # URL matching will be updated periodically (like every 6 hours)
         self.component_ids = []
         self.component_names = []
         self.endpoint_urls = []
@@ -219,9 +223,7 @@ class Configuration(object):
                             self.endpoint_version_urls.append(self.intuit_db[center][svc][env]['version_url'])
         
         self.num_urls = len(self.component_ids)
-        # print "Number of urls:", self.num_urls
-        # for i in range(self.num_urls):
-            # print self.component_ids[i], self.endpoint_urls[i], self.endpoint_version_urls[i]
+        print 'Number of URLs:', self.num_urls
         for endpoint_url in self.endpoint_urls:
             self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
         
