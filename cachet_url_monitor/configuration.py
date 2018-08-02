@@ -166,6 +166,7 @@ class Configuration(object):
                     name = each_entry['name']
                     check_url = each_entry['url']
                     env = each_entry['env']
+                    # ignore overlay services
                     if not 'overlay' in name: 
                         # special case when env is prd because we may have multiple prd environments       
                         if env == 'prd':
@@ -212,16 +213,11 @@ class Configuration(object):
                         if env in self.intuit_db[center][svc]:
                             self.component_ids.append(self.cachet_db[center][svc][env])
                             self.component_names.append('-'.join([svc, center, env]))
-                            self.endpoint_urls.append(self.intuit_db[center][svc][env]['url'])
-                            self.endpoint_version_urls.append(self.intuit_db[center][svc][env]['version_url'])
+                            self.endpoint_urls.append(normalize_url(self.intuit_db[center][svc][env]['url']))
+                            self.endpoint_version_urls.append(normalize_url(self.intuit_db[center][svc][env]['version_url']))
         
         self.num_urls = len(self.component_ids)
         print 'Number of URLs:', self.num_urls
-        # print self.endpoint_version_urls
-        
-        # for i in range(self.num_urls):
-            # print 'service:', self.component_names[i], 'version url:', self.endpoint_version_urls[i]
-        
         for endpoint_url in self.endpoint_urls:
             self.logger.info('Monitoring URL: %s %s' % (self.endpoint_method, endpoint_url))
         
@@ -396,7 +392,6 @@ class Configuration(object):
         for i in range(self.num_urls):
             if not self.trigger_updates[i]:
                 return
-            # if hasattr(self, 'incident_id') and self.statuses[i] == st.COMPONENT_STATUS_OPERATIONAL:
             if self.incident_ids[i] != -1 and self.statuses[i] == st.COMPONENT_STATUS_OPERATIONAL:
                 # If the incident already exists, it means it was unhealthy but now it's healthy again.
                 params = {'status': 4, 'visible': self.public_incidents, 'component_id': self.component_ids[i],
@@ -410,12 +405,10 @@ class Configuration(object):
                     self.logger.info(
                         'Incident updated, API healthy again: component status [%d], message: "%s"' % (
                             self.statuses[i], self.messages[i]))
-                    # del self.incident_id
                     self.incident_ids[i] = -1
                 else:
                     self.logger.warning('Incident update failed with status [%d], message: "%s"' % (
                         incident_request.status_code, self.messages[i]))
-            # elif not hasattr(self, 'incident_id') and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
             elif self.incident_ids[i] != -1 and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
                 # This is the first time the incident is being created.
                 params = {'name': 'URL unavailable', 'message': self.messages[i], 'status': 1, 'visible': self.public_incidents,
