@@ -132,7 +132,7 @@ class Configuration(object):
         # We need the current status so we monitor the status changes. This is necessary for creating incidents.
         self.statuses = [get_current_status(self.api_url, self.component_ids[i], self.headers) for i in range(self.num_urls)]
         self.requests = [-1 for i in range(self.num_urls)]
-        self.trigger_updates = [False for i in range(self.num_urls)] 
+        self.trigger_updates = [True for i in range(self.num_urls)] 
         self.current_fails = [0 for i in range(self.num_urls)]
         self.incident_ids = [-1 for i in range(self.num_urls)]
         self.versions = ["" for i in range(self.num_urls)]
@@ -214,7 +214,11 @@ class Configuration(object):
                             self.component_ids.append(self.cachet_db[center][svc][env])
                             self.component_names.append('-'.join([svc, center, env]))
                             self.endpoint_urls.append(normalize_url(self.intuit_db[center][svc][env]['url']))
-                            self.endpoint_version_urls.append(normalize_url(self.intuit_db[center][svc][env]['version_url']))
+                            version_url = self.intuit_db[center][svc][env]['version_url']
+                            if version_url: 
+                                self.endpoint_version_urls.append(normalize_url(version_url))
+                            else:
+                                self.endpoint_version_urls.append(version_url)
         
         self.num_urls = len(self.component_ids)
         print 'Number of URLs:', self.num_urls
@@ -232,7 +236,7 @@ class Configuration(object):
         self.messages = ["" for i in range(self.num_urls)]
         self.statuses = [get_current_status(self.api_url, self.component_ids[i], self.headers) for i in range(self.num_urls)]
         self.requests = [-1 for i in range(self.num_urls)]
-        self.trigger_updates = [False for i in range(self.num_urls)] 
+        self.trigger_updates = [True for i in range(self.num_urls)] 
         self.current_fails = [0 for i in range(self.num_urls)]
         self.incident_ids = [-1 for i in range(self.num_urls)]
         self.versions = ["" for i in range(self.num_urls)]
@@ -320,7 +324,7 @@ class Configuration(object):
                     self.statuses[i] = status
                     self.messages[i] = expectation.get_message(self.requests[i])
                     self.logger.info(self.messages[i])
-
+        
     def print_out(self):
         self.logger.info('Current configuration:\n%s' % (self.__repr__()))
 
@@ -341,7 +345,7 @@ class Configuration(object):
                 self.logger.info('Failure #%s with threshold set to %s' % (self.current_fails[i], self.allowed_fails))
                 if self.current_fails[i] <= self.allowed_fails:
                     self.trigger_updates[i] = False
-                    return
+                    continue
             self.current_fails[i] = 0
             self.trigger_updates[i] = True
 
@@ -351,7 +355,7 @@ class Configuration(object):
         """
         for i in range(self.num_urls):
             if not self.trigger_updates[i]:
-                return
+                continue
             # added push version number to the description        
             params = {'id': self.component_ids[i], 'status': self.statuses[i], 'description': self.versions[i]}
             component_request = requests.put('%s/components/%d' % (self.api_url, self.component_ids[i]), params=params,
@@ -391,7 +395,7 @@ class Configuration(object):
         """
         for i in range(self.num_urls):
             if not self.trigger_updates[i]:
-                return
+                continue
             if self.incident_ids[i] != -1 and self.statuses[i] == st.COMPONENT_STATUS_OPERATIONAL:
                 # If the incident already exists, it means it was unhealthy but now it's healthy again.
                 params = {'status': 4, 'visible': self.public_incidents, 'component_id': self.component_ids[i],
@@ -409,7 +413,7 @@ class Configuration(object):
                 else:
                     self.logger.warning('Incident update failed with status [%d], message: "%s"' % (
                         incident_request.status_code, self.messages[i]))
-            elif self.incident_ids[i] != -1 and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
+            elif self.incident_ids[i] == -1 and self.statuses[i] != st.COMPONENT_STATUS_OPERATIONAL:
                 # This is the first time the incident is being created.
                 params = {'name': 'URL unavailable', 'message': self.messages[i], 'status': 1, 'visible': self.public_incidents,
                         'component_id': self.component_ids[i], 'component_status': self.statuses[i], 'notify': True}
